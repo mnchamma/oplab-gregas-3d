@@ -17,42 +17,56 @@ pd.set_option("display.max_columns", None)
 
 
 ### FUNÇÃO PARA CALCULAR BS
-def bs(type,preco_spot, strike, dias_vcto_252, taxa_selic, volat_stdv):
-
+def bs(type,preco_spot, strike, dias_vcto = 30/365, taxa_selic = 0.1375, volat_stdv = 0.40, calendar_base = 365):
+    # 'call' ou 'put'
     if type == 'CALL':
         type = 1
     else:
         type = -1
-    # 'call' ou 'put'
+
+    # Initial parameters
     S = preco_spot
     K = strike
-    T = dias_vcto_252
+    T = dias_vcto
     r = taxa_selic
     sigma = volat_stdv
+    q = 0 ### dividends
 
-    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = (np.log(S / K) + (r - 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    # D1
+    d1 = (np.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    # D2
+    d2 = (np.log(S / K) + (r - q - 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
 
+    # dfq = dividend Discount factor
+    dfq = e ** -(q*T)
+    # df = risk free Discount factor
+    df = e ** -(r*T)
+
+    # Premium
     if type == 1:
-        premio = (S * si.norm.cdf(d1, 0.0, 1.0) - K * np.exp(-r * T) * si.norm.cdf(d2, 0.0, 1.0))
+        premio = (S * norm.cdf(d1) - K * df * norm.cdf(d2))
     else:
-        premio = (K * np.exp(-r * T) * si.norm.cdf(-d2, 0.0, 1.0) - S * si.norm.cdf(-d1, 0.0, 1.0))
-    dfq = e ** (T)
+        premio = (K * df * norm.cdf(-d2) - S * norm.cdf(-d1))
+    
+    # Delta
     if type == 1:
-        dfq = dfq * norm.cdf(d1)
+        delta = dfq * norm.cdf(d1)
     else:
-        dfq = dfq * (norm.cdf(d1) - 1)
-
-    delta = dfq
+        delta = dfq * (norm.cdf(d1) - 1)
 
     # Vega for 1% change in vol
-    vega =  0.01 * S * e ** (T) * norm.pdf(d1) * T ** 0.5
+    vega =  0.01 * S * dfq * norm.pdf(d1) * (T ** 0.5)
 
     # Theta for 1 day change
-    df = e ** -(r * T)
-    theta = (1.0 / 365.0) * (-0.5 * S * dfq * norm.pdf(d1) * sigma / (T ** 0.5) - r * K * df * norm.cdf(d2))
-    sigmaT = sigma * T ** 0.5
-    gamma = e ** (T) * norm.pdf(d1) / (S * sigmaT)
+    if type == 1:
+        theta = (1.0 / calendar_base) * (-0.5 * S * sigma * dfq * norm.pdf(d1) / (T ** 0.5) - r * K * df * norm.cdf(d2) + q*S*dfq*norm.cdf(d1))
+    else:
+        theta = (1.0 / calendar_base) * (-0.5 * S * sigma * dfq * norm.pdf(d1) / (T ** 0.5) + r * K * df * norm.cdf(-d2) - q*S*dfq*norm.cdf(-d1))
+
+    # Gamma
+    sigmaT = sigma * (T ** 0.5)
+    gamma = dfq * norm.pdf(d1) / (S * sigmaT)
+
     return (premio,delta,vega,theta,gamma)
 
 ### FUNÇÃO PARA PEGAR TOKEN DE AUTENTICAÇÃO NA API
@@ -95,6 +109,7 @@ def grade_dia(token,symbol,from_,to_,vctos = 1,call_put = 'PUT'):
     premio_list = []
     bs_list = []
     delta_list = []
+    d1_list = []
     gamma_list = []
     theta_list = []
     vega_list = []
@@ -107,6 +122,8 @@ def grade_dia(token,symbol,from_,to_,vctos = 1,call_put = 'PUT'):
             lista_vcto_atual.append(i)
     for j in lista_vcto_atual:
         # print(j)
+        d = bs(call_put,j['spot']['price'], j['strike'], (datetime.strptime(j['due_date'][:10], "%Y-%m-%d") - datetime.strptime(j['time'][:10], "%Y-%m-%d")).days/360, 0.1375, j['volatility']/100)[1]
+        print(d)
         spot.append(j['spot']['price'])
         strikes.append(j['strike'])
         vcto_list.append((datetime.strptime(j['due_date'][:10], "%Y-%m-%d") - datetime.strptime(j['time'][:10], "%Y-%m-%d")).days)
@@ -114,12 +131,13 @@ def grade_dia(token,symbol,from_,to_,vctos = 1,call_put = 'PUT'):
         premio_list.append(j['premium'])
         bs_list.append(j['bs'])
         delta_list.append(j['delta'])
+        d1_list.append(d)
         gamma_list.append(j['gamma'])
         theta_list.append(j['theta'])
         vega_list.append(j['vega'])
 
     df = pd.DataFrame({'s':spot,'k':strikes,'vctos':vcto_list,'vol':vols,'premio':premio_list,'bs':bs_list
-                       ,'Delta':delta_list,'Gamma':gamma_list,'Theta':theta_list,'Vega':vega_list})
+                       ,'Delta':delta_list,'Gamma':gamma_list,'Theta':theta_list,'Vega':vega_list,'Delta1':d1_list})
     df = df.sort_values(by = 'k')
 
     return df
@@ -191,21 +209,22 @@ def smile_do_dia(token,symbol,data_estudo,spot_price,lista_strikes,vctos = 1,ran
 
 ### INSERIR EMAIL E SENHA --> get_token('seu@email.com','sua_senha')
 try:
-    token = get_token()
+    token = get_token('','')
 except:
     print('TOKEN ERRADO')
     exit()
 
 ### PARAMETROS INICIAIS DO ESTUDO
-data_estudo = datetime(2022,10,27)
+data_estudo = datetime(2023,1,16)
 
 
-symbol = 'PETR4'
+symbol = 'petr4'
 tipo = 'CALL'
 
 spot = getFechamentosPorData(token,symbol,data_estudo,data_estudo)['Adj Close'][0]
 spot_vol = getFechamentosPorData(token,symbol+'IVX',data_estudo,data_estudo)['Adj Close'][0]
 vol = spot_vol/100
+
 
 
 
@@ -300,9 +319,10 @@ bx1.plot(smile[1],smile[0])
 bx2.plot(grade['mnnss'],grade['Delta'])
 bx2.plot(grade['mnnss'],grade['Vega'])
 bx2.plot(grade['mnnss'],grade['Theta'])
+bx2.plot(grade['mnnss'],grade['Delta1'])
 bx1.set_title('Smile {} - {}'.format(symbol,data_estudo.date()))
 bx1.legend(['Vértices Considerados','Polinômio'])
-bx2.legend(['Delta','Vega','Theta'])
+bx2.legend(['Delta','Vega','Theta','Delta1'])
 
 
 plt.show()
