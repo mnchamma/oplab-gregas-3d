@@ -17,7 +17,7 @@ pd.set_option("display.max_columns", None)
 
 
 ### FUNÇÃO PARA CALCULAR BS
-def bs(type,preco_spot, strike, dias_vcto = 30/365, taxa_selic = 0.1375, volat_stdv = 0.40, calendar_base = 365):
+def bs(type,preco_spot, strike, dias_vcto = 30, taxa_selic = 0.1375, volat_stdv = 0.40, calendar_base = 365):
     # 'call' ou 'put'
     if type == 'CALL':
         type = 1
@@ -27,7 +27,7 @@ def bs(type,preco_spot, strike, dias_vcto = 30/365, taxa_selic = 0.1375, volat_s
     # Initial parameters
     S = preco_spot
     K = strike
-    T = dias_vcto
+    T = dias_vcto/calendar_base
     r = taxa_selic
     sigma = volat_stdv
     q = 0 ### dividends
@@ -110,6 +110,7 @@ def grade_dia(token,symbol,from_,to_,vctos = 1,call_put = 'PUT'):
     bs_list = []
     delta_list = []
     d1_list = []
+    t_list = []
     gamma_list = []
     theta_list = []
     vega_list = []
@@ -122,7 +123,8 @@ def grade_dia(token,symbol,from_,to_,vctos = 1,call_put = 'PUT'):
             lista_vcto_atual.append(i)
     for j in lista_vcto_atual:
         # print(j)
-        d = bs(call_put,j['spot']['price'], j['strike'], (datetime.strptime(j['due_date'][:10], "%Y-%m-%d") - datetime.strptime(j['time'][:10], "%Y-%m-%d")).days/360, 0.1375, j['volatility']/100)[1]
+        d = bs(call_put,j['spot']['price'], j['strike'], (datetime.strptime(j['due_date'][:10], "%Y-%m-%d") - datetime.strptime(j['time'][:10], "%Y-%m-%d")).days, 0.1375, j['volatility']/100)[1]
+        t = bs(call_put,j['spot']['price'], j['strike'], (datetime.strptime(j['due_date'][:10], "%Y-%m-%d") - datetime.strptime(j['time'][:10], "%Y-%m-%d")).days, 0.1375, j['volatility']/100)[3]
         print(d)
         spot.append(j['spot']['price'])
         strikes.append(j['strike'])
@@ -134,10 +136,11 @@ def grade_dia(token,symbol,from_,to_,vctos = 1,call_put = 'PUT'):
         d1_list.append(d)
         gamma_list.append(j['gamma'])
         theta_list.append(j['theta'])
+        t_list.append(t)
         vega_list.append(j['vega'])
 
     df = pd.DataFrame({'s':spot,'k':strikes,'vctos':vcto_list,'vol':vols,'premio':premio_list,'bs':bs_list
-                       ,'Delta':delta_list,'Gamma':gamma_list,'Theta':theta_list,'Vega':vega_list,'Delta1':d1_list})
+                       ,'Delta':delta_list,'Gamma':gamma_list,'Theta':theta_list,'Vega':vega_list,'Delta1':d1_list,'Theta1':t_list})
     df = df.sort_values(by = 'k')
 
     return df
@@ -218,7 +221,7 @@ except:
 data_estudo = datetime(2023,1,16)
 
 
-symbol = 'petr4'
+symbol = 'PETR4'
 tipo = 'CALL'
 
 spot = getFechamentosPorData(token,symbol,data_estudo,data_estudo)['Adj Close'][0]
@@ -249,7 +252,7 @@ ax5 = fig.add_subplot(235, projection='3d')
 # PREMIO
 grega = 'PREMIO'
 
-Z = bs(tipo,spot,Y*spot,X/360,0.019,vol)[gregas[grega]]
+Z = bs(tipo,spot,Y*spot,X,0.019,vol)[gregas[grega]]
 
 # Plot a 3D surface
 ax1.plot_surface(X, Y, Z,cmap=cm.coolwarm)
@@ -261,7 +264,7 @@ ax1.set_title(grega)
 # DELTA
 grega = 'DELTA'
 
-Z = bs(tipo,spot,Y*spot,X/360,0.019,vol)[gregas[grega]]
+Z = bs(tipo,spot,Y*spot,X,0.019,vol)[gregas[grega]]
 
 # Plot a 3D surface
 ax2.plot_surface(X, Y, Z,cmap=cm.coolwarm)
@@ -273,7 +276,7 @@ ax2.set_title(grega)
 # VEGA
 grega = 'VEGA'
 
-Z = bs(tipo,spot,Y*spot,X/360,0.019,vol)[gregas[grega]]
+Z = bs(tipo,spot,Y*spot,X,0.019,vol)[gregas[grega]]
 
 # Plot a 3D surface
 ax3.plot_surface(X, Y, Z,cmap=cm.coolwarm)
@@ -285,7 +288,7 @@ ax3.set_title(grega)
 # THETA
 grega = 'THETA'
 
-Z = bs(tipo,spot,Y*spot,X/360,0.019,vol)[gregas[grega]]
+Z = bs(tipo,spot,Y*spot,X,0.019,vol)[gregas[grega]]
 
 # Plot a 3D surface
 ax4.plot_surface(X, Y, Z,cmap=cm.coolwarm)
@@ -297,7 +300,7 @@ ax4.set_title(grega)
 # GAMA
 grega = 'GAMA'
 
-Z = bs(tipo,spot,Y*spot,X/360,0.019,vol)[gregas[grega]]
+Z = bs(tipo,spot,Y*spot,X,0.019,vol)[gregas[grega]]
 
 # Plot a 3D surface
 ax5.plot_surface(X, Y, Z,cmap=cm.coolwarm)
@@ -320,9 +323,10 @@ bx2.plot(grade['mnnss'],grade['Delta'])
 bx2.plot(grade['mnnss'],grade['Vega'])
 bx2.plot(grade['mnnss'],grade['Theta'])
 bx2.plot(grade['mnnss'],grade['Delta1'])
+bx2.plot(grade['mnnss'],grade['Theta1'])
 bx1.set_title('Smile {} - {}'.format(symbol,data_estudo.date()))
 bx1.legend(['Vértices Considerados','Polinômio'])
-bx2.legend(['Delta','Vega','Theta','Delta1'])
+bx2.legend(['Delta','Vega','Theta','Delta1','Theta1'])
 
 
 plt.show()
